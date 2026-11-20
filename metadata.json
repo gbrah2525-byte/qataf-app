@@ -1,0 +1,6 @@
+{
+  "name": "قطف USDT — منصة المكافآت والتحويل المشفر",
+  "description": "منصة عربية متكاملة لربح عملة USDT عبر المهام الحقيقية ومشاهدة الإعلانات بلا حدود يومية، مع محفظة داخلية وسحب مباشر على شبكتي TRC20 و BEP20 إلى محفظة Trust Wallet.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

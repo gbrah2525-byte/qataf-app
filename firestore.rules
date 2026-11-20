@@ -1,0 +1,392 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedEmail() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedEmail() && (
+        request.auth.token.email == 'gbrah2525@gmail.com'
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidNetwork(net) {
+      return net is string && net in ['TRC20', 'BEP20'];
+    }
+
+    function isValidOptionalHttpsUrl(url) {
+      return url is string && url.size() <= 512 && (url == '' || url.matches('^https://.*'));
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid', 'displayName', 'email', 'points', 'totalEarnedPoints',
+          'totalWithdrawnUsdt', 'adsWatchedCount', 'tasksCompletedCount',
+          'linkedWalletAddress', 'linkedNetwork', 'walletVerified',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'points', 'totalEarnedPoints',
+          'totalWithdrawnUsdt', 'adsWatchedCount', 'tasksCompletedCount',
+          'linkedWalletAddress', 'linkedNetwork', 'walletVerified',
+          'createdAt', 'updatedAt'
+        ])
+        && data.uid is string && data.uid == userId && data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && data.points is int && data.points >= 0 && data.points <= 100000000
+        && data.totalEarnedPoints is int && data.totalEarnedPoints >= 0 && data.totalEarnedPoints <= 100000000
+        && (data.totalWithdrawnUsdt is int || data.totalWithdrawnUsdt is float)
+        && data.totalWithdrawnUsdt >= 0 && data.totalWithdrawnUsdt <= 1000000
+        && data.adsWatchedCount is int && data.adsWatchedCount >= 0 && data.adsWatchedCount <= 1000000
+        && data.tasksCompletedCount is int && data.tasksCompletedCount >= 0 && data.tasksCompletedCount <= 100000
+        && data.linkedWalletAddress is string && data.linkedWalletAddress.size() <= 64
+        && isValidNetwork(data.linkedNetwork)
+        && data.walletVerified is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTaskCompletion(data, userId, completionId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'taskId', 'taskTitle', 'pointsAwarded',
+          'verificationReceipt', 'completedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'taskId', 'taskTitle', 'pointsAwarded',
+          'verificationReceipt', 'completedAt'
+        ])
+        && data.id is string && data.id == completionId
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.taskId is string && data.taskId.size() >= 1 && data.taskId.size() <= 64
+        && data.taskTitle is string && data.taskTitle.size() >= 1 && data.taskTitle.size() <= 140
+        && data.pointsAwarded is int && data.pointsAwarded >= 10 && data.pointsAwarded <= 5000
+        && data.verificationReceipt is string && data.verificationReceipt.size() >= 16 && data.verificationReceipt.size() <= 256
+        && data.completedAt is timestamp && data.completedAt == request.time;
+    }
+
+    function isValidAdRewardLog(data, userId, logId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'adCampaignId', 'adTitle', 'durationSeconds',
+          'pointsAwarded', 'sessionSignature', 'completedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'adCampaignId', 'adTitle', 'durationSeconds',
+          'pointsAwarded', 'sessionSignature', 'completedAt'
+        ])
+        && data.id is string && data.id == logId
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.adCampaignId is string && data.adCampaignId.size() >= 1 && data.adCampaignId.size() <= 64
+        && data.adTitle is string && data.adTitle.size() >= 1 && data.adTitle.size() <= 140
+        && data.durationSeconds is int && data.durationSeconds >= 1 && data.durationSeconds <= 600
+        && data.pointsAwarded is int && data.pointsAwarded == 50
+        && data.sessionSignature is string && data.sessionSignature.size() >= 16 && data.sessionSignature.size() <= 256
+        && data.completedAt is timestamp && data.completedAt == request.time;
+    }
+
+    function isValidWithdrawalTx(data, userId, txDocId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'orderId', 'network', 'walletAddress', 'pointsDeducted',
+          'amountUsdt', 'gasFeeCoveredUsdt', 'netDeliveredUsdt', 'txHash',
+          'explorerUrl', 'executionMode', 'status', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'orderId', 'network', 'walletAddress', 'pointsDeducted',
+          'amountUsdt', 'gasFeeCoveredUsdt', 'netDeliveredUsdt', 'txHash',
+          'explorerUrl', 'executionMode', 'status', 'createdAt'
+        ])
+        && data.id is string && data.id == txDocId
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.orderId is string && data.orderId.size() >= 6 && data.orderId.size() <= 64
+        && isValidNetwork(data.network)
+        && data.walletAddress is string && data.walletAddress.size() >= 34 && data.walletAddress.size() <= 64
+        && data.pointsDeducted is int && data.pointsDeducted >= 1000 && data.pointsDeducted <= 100000000
+        && (data.amountUsdt is int || data.amountUsdt is float) && data.amountUsdt >= 1 && data.amountUsdt <= 100000
+        && (data.gasFeeCoveredUsdt is int || data.gasFeeCoveredUsdt is float) && data.gasFeeCoveredUsdt >= 0 && data.gasFeeCoveredUsdt <= 50
+        && (data.netDeliveredUsdt is int || data.netDeliveredUsdt is float) && data.netDeliveredUsdt >= 1 && data.netDeliveredUsdt <= 100000
+        && data.txHash is string && data.txHash.size() >= 8 && data.txHash.size() <= 128
+        && data.explorerUrl is string && data.explorerUrl.size() <= 256
+        && data.executionMode is string && data.executionMode in ['live_mainnet', 'cloud_queued', 'testnet_broadcast', 'sandbox_signed']
+        && data.status is string && data.status in ['confirmed', 'pending', 'failed']
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWithdrawalRequest(data, requestId) {
+      return data.keys().hasAll([
+          'id', 'orderId', 'userId', 'userEmail', 'walletAddress', 'network',
+          'pointsDeducted', 'usdtAmount', 'txHash', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'orderId', 'userId', 'userEmail', 'walletAddress', 'network',
+          'pointsDeducted', 'usdtAmount', 'txHash', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == requestId
+        && data.orderId is string && data.orderId.size() >= 6 && data.orderId.size() <= 64
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128
+        && data.userEmail is string && data.userEmail.size() >= 3 && data.userEmail.size() <= 150
+        && data.walletAddress is string && data.walletAddress.size() >= 34 && data.walletAddress.size() <= 64
+        && isValidNetwork(data.network)
+        && data.pointsDeducted is int && data.pointsDeducted >= 1000 && data.pointsDeducted <= 100000000
+        && (data.usdtAmount is int || data.usdtAmount is float) && data.usdtAmount >= 1 && data.usdtAmount <= 100000
+        && data.txHash is string && data.txHash.size() <= 128
+        && data.status is string && data.status in ['pending', 'confirmed', 'failed']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEngineModule(data, userId, moduleId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'title', 'summary', 'prompt', 'entryFunctionName',
+          'code', 'testCode', 'sampleInputJson', 'verified', 'totalAttempts',
+          'lastOutputJson', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'title', 'summary', 'prompt', 'entryFunctionName',
+          'code', 'testCode', 'sampleInputJson', 'verified', 'totalAttempts',
+          'lastOutputJson', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == moduleId
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.summary is string && data.summary.size() <= 500
+        && data.prompt is string && data.prompt.size() >= 1 && data.prompt.size() <= 2000
+        && data.entryFunctionName is string && data.entryFunctionName.size() >= 1 && data.entryFunctionName.size() <= 80
+        && data.code is string && data.code.size() >= 10 && data.code.size() <= 32768
+        && data.testCode is string && data.testCode.size() >= 5 && data.testCode.size() <= 16384
+        && data.sampleInputJson is string && data.sampleInputJson.size() <= 8192
+        && data.verified is bool && data.verified == true
+        && data.totalAttempts is int && data.totalAttempts >= 1 && data.totalAttempts <= 3
+        && data.lastOutputJson is string && data.lastOutputJson.size() <= 16384
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdsterraConfig(data) {
+      return data.keys().hasAll([
+          'id', 'enabled', 'bannerKey', 'bannerWidth', 'bannerHeight',
+          'nativeScriptUrl', 'nativeContainerId', 'socialBarScriptUrl',
+          'popunderScriptUrl', 'directLinkUrl', 'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'enabled', 'bannerKey', 'bannerWidth', 'bannerHeight',
+          'nativeScriptUrl', 'nativeContainerId', 'socialBarScriptUrl',
+          'popunderScriptUrl', 'directLinkUrl', 'updatedBy', 'updatedAt'
+        ])
+        && data.id is string && data.id == 'adsterra_config'
+        && data.enabled is bool
+        && data.bannerKey is string && data.bannerKey.size() <= 128
+        && data.bannerWidth is int && data.bannerWidth >= 100 && data.bannerWidth <= 1200
+        && data.bannerHeight is int && data.bannerHeight >= 40 && data.bannerHeight <= 1000
+        && isValidOptionalHttpsUrl(data.nativeScriptUrl)
+        && data.nativeContainerId is string && data.nativeContainerId.size() <= 128
+        && isValidOptionalHttpsUrl(data.socialBarScriptUrl)
+        && isValidOptionalHttpsUrl(data.popunderScriptUrl)
+        && isValidOptionalHttpsUrl(data.directLinkUrl)
+        && data.updatedBy is string && data.updatedBy == request.auth.token.email
+        && data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Rules
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().points == 0
+        && incoming().totalEarnedPoints == 0
+        && incoming().totalWithdrawnUsdt == 0
+        && incoming().adsWatchedCount == 0
+        && incoming().tasksCompletedCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Credit Ad Reward (+50 points)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['points', 'totalEarnedPoints', 'adsWatchedCount', 'updatedAt'])
+            && incoming().points == existing().points + 50
+            && incoming().totalEarnedPoints == existing().totalEarnedPoints + 50
+            && incoming().adsWatchedCount == existing().adsWatchedCount + 1
+          )
+          ||
+          // Action: Credit Task Reward (bounded 10..5000 points)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['points', 'totalEarnedPoints', 'tasksCompletedCount', 'updatedAt'])
+            && incoming().points > existing().points
+            && (incoming().points - existing().points) <= 5000
+            && (incoming().totalEarnedPoints - existing().totalEarnedPoints) == (incoming().points - existing().points)
+            && incoming().tasksCompletedCount == existing().tasksCompletedCount + 1
+          )
+          ||
+          // Action: Link / Verify Trust Wallet
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['linkedWalletAddress', 'linkedNetwork', 'walletVerified', 'updatedAt'])
+          )
+          ||
+          // Action: Deduct Points on Withdrawal
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['points', 'totalWithdrawnUsdt', 'updatedAt'])
+            && incoming().points < existing().points
+            && incoming().points >= 0
+            && incoming().totalWithdrawnUsdt > existing().totalWithdrawnUsdt
+          )
+        );
+
+      allow delete: if false;
+
+      // Subcollection: Task Completions
+      match /taskCompletions/{completionId} {
+        allow get: if isValidId(userId) && isValidId(completionId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(completionId)
+          && isOwner(userId)
+          && isValidTaskCompletion(incoming(), userId, completionId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update, delete: if false;
+      }
+
+      // Subcollection: Ad Reward Logs
+      match /adLogs/{logId} {
+        allow get: if isValidId(userId) && isValidId(logId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(logId)
+          && isOwner(userId)
+          && isValidAdRewardLog(incoming(), userId, logId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update, delete: if false;
+      }
+
+      // Subcollection: Withdrawals
+      match /withdrawals/{txDocId} {
+        allow get: if isValidId(userId) && isValidId(txDocId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(txDocId)
+          && isOwner(userId)
+          && isValidWithdrawalTx(incoming(), userId, txDocId)
+          && incoming().status in ['pending', 'confirmed']
+          && incoming().executionMode in ['live_mainnet', 'cloud_queued']
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && isValidId(txDocId)
+          && isAdmin()
+          && isValidWithdrawalTx(incoming(), userId, txDocId)
+          && existing().status == 'pending'
+          && incoming().userId == existing().userId
+          && incoming().orderId == existing().orderId
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'txHash', 'explorerUrl', 'executionMode']);
+        allow delete: if false;
+      }
+
+      // Subcollection: Verified Autonomous Engine Modules
+      match /engine_modules/{moduleId} {
+        allow get: if isValidId(userId) && isValidId(moduleId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(moduleId)
+          && isOwner(userId)
+          && isValidEngineModule(incoming(), userId, moduleId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && isValidId(moduleId)
+          && isOwner(userId)
+          && isValidEngineModule(incoming(), userId, moduleId)
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time;
+        allow delete: if isValidId(userId) && isValidId(moduleId) && isOwner(userId);
+      }
+    }
+
+    // 5. Cloud Withdrawal Requests Queue
+    match /withdrawal_requests/{requestId} {
+      allow get: if isValidId(requestId) && isVerifiedEmail() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedEmail() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isValidId(requestId)
+        && isVerifiedEmail()
+        && isValidWithdrawalRequest(incoming(), requestId)
+        && incoming().userId == request.auth.uid
+        && incoming().status in ['pending', 'confirmed']
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      allow update: if isValidId(requestId)
+        && isAdmin()
+        && isValidWithdrawalRequest(incoming(), requestId)
+        && existing().status == 'pending'
+        && incoming().userId == existing().userId
+        && incoming().orderId == existing().orderId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'txHash', 'updatedAt']);
+
+      allow delete: if false;
+    }
+
+    // 6. Global Adsterra Publisher Settings (Readable by verified users, Writable by Admin only)
+    match /app_settings/{settingId} {
+      allow get: if isValidId(settingId) && settingId == 'adsterra_config' && isVerifiedEmail();
+      allow list: if false;
+
+      allow create: if isValidId(settingId)
+        && settingId == 'adsterra_config'
+        && isAdmin()
+        && isValidAdsterraConfig(incoming())
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(settingId)
+        && settingId == 'adsterra_config'
+        && isAdmin()
+        && isValidAdsterraConfig(incoming())
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+  }
+}
